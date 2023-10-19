@@ -1,6 +1,6 @@
 use bevy::{math::*, prelude::*, sprite::collide_aabb::*};
 //paddle
-const PADDLE_START_Y: f32 = 0.0;
+const PADDLE_START_Y: f32 = BOTTOM_WALL + 60.;
 const PADDLE_SIZE: Vec2 = Vec2::new(120.0, 20.0);
 const PADDLE_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
 const PADDLE_SPEED: f32 = 500.0;
@@ -21,6 +21,14 @@ const WALL_THICKNESS: f32 = 10.0;
 const WALL_BLOCK_WIDTH: f32 = RIGHT_WALL - LEFT_WALL;
 const WALL_BLOCK_HEIGHT: f32 = TOP_WALL - BOTTOM_WALL;
 const WALL_COLOR: Color = Color::rgb(0.8, 0.8, 0.8);
+
+//bricks
+const BRICK_SIZE: Vec2 = Vec2::new(100., 30.);
+const BRICK_COLOR: Color = Color::rgb(0.5, 0.5, 1.0);
+const GAP_BETWEEN_PADDLE_AND_BRICKS: f32 = 270.0;
+const GAP_BETWEEN_BRICKS: f32 = 5.0;
+const GAP_BETWEEN_BRICKS_AND_CEILING: f32 = 20.0;
+const GAP_BETWEEN_BRICKS_AND_SIDES: f32 = 20.0;
 
 fn main() {
     App::new()
@@ -60,6 +68,9 @@ struct WallBundle {
     sprite_bundle: SpriteBundle,
     collider: Collider,
 }
+
+#[derive(Component)]
+struct Brick;
 
 fn setup(mut commands: Commands, assets_server: Res<AssetServer>) {
     //camera
@@ -182,6 +193,47 @@ fn setup(mut commands: Commands, assets_server: Res<AssetServer>) {
                 size: horizontal_wall_size,
             },
         });
+
+        //bricks
+        {
+            let offset_x = LEFT_WALL + GAP_BETWEEN_BRICKS_AND_SIDES + BRICK_SIZE.x * 0.5;
+            let offset_y = BOTTOM_WALL + GAP_BETWEEN_PADDLE_AND_BRICKS + BRICK_SIZE.y * 0.5;
+
+            let bricks_total_width = (RIGHT_WALL - LEFT_WALL) - 2. * GAP_BETWEEN_BRICKS_AND_SIDES;
+            let bricks_total_height = (TOP_WALL - BOTTOM_WALL)
+                - GAP_BETWEEN_BRICKS_AND_CEILING
+                - GAP_BETWEEN_PADDLE_AND_BRICKS;
+
+            let rows = (bricks_total_height / (BRICK_SIZE.y + GAP_BETWEEN_BRICKS)).floor() as i32;
+            let columns = (bricks_total_width / (BRICK_SIZE.x + GAP_BETWEEN_BRICKS)).floor() as i32;
+
+            for row in 0..rows {
+                for column in 0..columns {
+                    let brick_pos = vec2(
+                        offset_x + column as f32 * (BRICK_SIZE.x + GAP_BETWEEN_BRICKS),
+                        offset_y + row as f32 * (BRICK_SIZE.y + GAP_BETWEEN_BRICKS),
+                    );
+
+                    commands.spawn((
+                        SpriteBundle {
+                            transform: Transform {
+                                translation: brick_pos.extend(0.0),
+                                ..default()
+                            },
+                            sprite: Sprite {
+                                color: BRICK_COLOR,
+                                custom_size: Some(BRICK_SIZE),
+                                ..default()
+                            },
+                            ..default()
+                        },
+                        //Brick { health: 100 },
+                        Brick,
+                        Collider { size: BRICK_SIZE },
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -223,10 +275,10 @@ fn check_ball_collisions(
     //mut score: ResMut<Scoreboard>,
     //collision_sound: Res<CollisionSound>,
     mut ball_query: Query<(&mut Velocity, &Transform, &Ball)>,
-    mut collider_query: Query<(&Transform, &Collider)>, // Note the mutability for Brick
+    mut collider_query: Query<(Entity, &Transform, &Collider, Option<&Brick>)>, // Note the mutability for Brick
 ) {
     for (mut ball_velocity, ball_transform, ball) in &mut ball_query {
-        for (transform, other) in &mut collider_query {
+        for (other_entity, transform, other, opt_brick) in &mut collider_query {
             let collision = collide(
                 ball_transform.translation,
                 ball.size,
@@ -250,6 +302,10 @@ fn check_ball_collisions(
                 }
                 if reflect_y {
                     ball_velocity.y *= -1.;
+                }
+
+                if opt_brick.is_some() {
+                    commands.entity(other_entity).despawn()
                 }
 
                 //if let Some(mut brick) = opt_brick {
