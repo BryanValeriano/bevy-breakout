@@ -1,5 +1,4 @@
-use bevy::{math::*, prelude::*};
-
+use bevy::{math::*, prelude::*, sprite::collide_aabb::*};
 //paddle
 const PADDLE_START_Y: f32 = 0.0;
 const PADDLE_SIZE: Vec2 = Vec2::new(120.0, 20.0);
@@ -13,13 +12,30 @@ const BALL_SIZE: Vec2 = Vec2::new(30.0, 30.0);
 const BALL_SPPED: f32 = 400.0;
 const BALL_INITTIAL_DIRECTION: Vec2 = Vec2::new(0.5, -0.5);
 
+//wall
+const LEFT_WALL: f32 = -450.;
+const RIGHT_WALL: f32 = 450.;
+const BOTTOM_WALL: f32 = -300.;
+const TOP_WALL: f32 = 300.;
+const WALL_THICKNESS: f32 = 10.0;
+const WALL_BLOCK_WIDTH: f32 = RIGHT_WALL - LEFT_WALL;
+const WALL_BLOCK_HEIGHT: f32 = TOP_WALL - BOTTOM_WALL;
+const WALL_COLOR: Color = Color::rgb(0.8, 0.8, 0.8);
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
         .add_systems(Update, bevy::window::close_on_esc)
         .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, (move_paddle, apply_velocity))
+        .add_systems(
+            FixedUpdate,
+            (
+                move_paddle,
+                apply_velocity,
+                check_ball_collisions.after(apply_velocity),
+            ),
+        )
         .run();
 }
 
@@ -27,12 +43,25 @@ fn main() {
 struct Paddle;
 
 #[derive(Component)]
-struct Ball;
+struct Ball {
+    size: Vec2,
+}
 
 #[derive(Component, Deref, DerefMut)]
 struct Velocity(Vec2);
 
-fn setup(mut commands: Commands) {
+#[derive(Component)]
+struct Collider {
+    size: Vec2,
+}
+
+#[derive(Bundle)]
+struct WallBundle {
+    sprite_bundle: SpriteBundle,
+    collider: Collider,
+}
+
+fn setup(mut commands: Commands, assets_server: Res<AssetServer>) {
     //camera
     commands.spawn(Camera2dBundle::default());
 
@@ -54,6 +83,7 @@ fn setup(mut commands: Commands) {
     ));
 
     //ball
+    let ball_texture = assets_server.load("textures/circle.png");
     commands.spawn((
         SpriteBundle {
             transform: Transform {
@@ -65,11 +95,93 @@ fn setup(mut commands: Commands) {
                 custom_size: Some(BALL_SIZE),
                 ..default()
             },
+            texture: ball_texture,
             ..default()
         },
-        Ball,
+        Ball { size: BALL_SIZE },
         Velocity(BALL_SPPED * BALL_INITTIAL_DIRECTION),
     ));
+
+    //walls
+    {
+        let vertical_wall_size = vec2(WALL_THICKNESS, WALL_BLOCK_HEIGHT + WALL_THICKNESS);
+        let horizontal_wall_size = vec2(WALL_BLOCK_WIDTH + WALL_THICKNESS, WALL_THICKNESS);
+        //left wall
+        commands.spawn(WallBundle {
+            sprite_bundle: SpriteBundle {
+                transform: Transform {
+                    translation: vec3(LEFT_WALL, 0.0, 0.0),
+                    ..default()
+                },
+                sprite: Sprite {
+                    color: WALL_COLOR,
+                    custom_size: Some(vertical_wall_size),
+                    ..default()
+                },
+                ..default()
+            },
+            collider: Collider {
+                size: vertical_wall_size,
+            },
+        });
+
+        //right wall
+        commands.spawn(WallBundle {
+            sprite_bundle: SpriteBundle {
+                transform: Transform {
+                    translation: vec3(RIGHT_WALL, 0.0, 0.0),
+                    ..default()
+                },
+                sprite: Sprite {
+                    color: WALL_COLOR,
+                    custom_size: Some(vertical_wall_size),
+                    ..default()
+                },
+                ..default()
+            },
+            collider: Collider {
+                size: vertical_wall_size,
+            },
+        });
+
+        //bottom wall
+        commands.spawn(WallBundle {
+            sprite_bundle: SpriteBundle {
+                transform: Transform {
+                    translation: vec3(0.0, BOTTOM_WALL, 0.0),
+                    ..default()
+                },
+                sprite: Sprite {
+                    color: WALL_COLOR,
+                    custom_size: Some(horizontal_wall_size),
+                    ..default()
+                },
+                ..default()
+            },
+            collider: Collider {
+                size: horizontal_wall_size,
+            },
+        });
+
+        //top wall
+        commands.spawn(WallBundle {
+            sprite_bundle: SpriteBundle {
+                transform: Transform {
+                    translation: vec3(0.0, TOP_WALL, 0.0),
+                    ..default()
+                },
+                sprite: Sprite {
+                    color: WALL_COLOR,
+                    custom_size: Some(horizontal_wall_size),
+                    ..default()
+                },
+                ..default()
+            },
+            collider: Collider {
+                size: horizontal_wall_size,
+            },
+        });
+    }
 }
 
 fn move_paddle(
@@ -80,6 +192,7 @@ fn move_paddle(
     let mut paddle_transform = query.single_mut();
 
     let mut direction = 0.0;
+
     if input.pressed(KeyCode::A) {
         direction -= 1.0;
     }
@@ -87,8 +200,11 @@ fn move_paddle(
         direction += 1.0;
     }
 
-    let new_x =
+    let mut new_x =
         paddle_transform.translation.x + direction * PADDLE_SPEED * time_step.period.as_secs_f32();
+
+    new_x = new_x.min(RIGHT_WALL - (WALL_THICKNESS + PADDLE_SIZE.x) * 0.5);
+    new_x = new_x.max(LEFT_WALL + (WALL_THICKNESS + PADDLE_SIZE.x) * 0.5);
 
     paddle_transform.translation.x = new_x;
 }
@@ -98,5 +214,58 @@ fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time_step: Res<
     for (mut transform, velocity) in &mut query {
         transform.translation.x += velocity.x * dt;
         transform.translation.y += velocity.y * dt;
+    }
+}
+
+fn check_ball_collisions(
+    mut commands: Commands,
+    //mut score: ResMut<Scoreboard>,
+    //collision_sound: Res<CollisionSound>,
+    mut ball_query: Query<(&mut Velocity, &Transform, &Ball)>,
+    mut collider_query: Query<(&Transform, &Collider)>, // Note the mutability for Brick
+) {
+    for (mut ball_velocity, ball_transform, ball) in &mut ball_query {
+        for (transform, other) in &mut collider_query {
+            let collision = collide(
+                ball_transform.translation,
+                ball.size,
+                transform.translation,
+                other.size,
+            );
+
+            let mut reflect_x = false;
+            let mut reflect_y = false;
+            if let Some(collision) = collision {
+                match collision {
+                    Collision::Left => reflect_x = ball_velocity.x > 0.0,
+                    Collision::Right => reflect_x = ball_velocity.x < 0.0,
+                    Collision::Top => reflect_y = ball_velocity.y < 0.0,
+                    Collision::Bottom => reflect_y = ball_velocity.y > 0.0,
+                    Collision::Inside => { /* do nothing */ }
+                }
+
+                if reflect_x {
+                    ball_velocity.x *= -1.;
+                }
+                if reflect_y {
+                    ball_velocity.y *= -1.;
+                }
+
+                //if let Some(mut brick) = opt_brick {
+                //    score.score += 1;
+                //    brick.health = (brick.health - 1).max(0);
+
+                //    if brick.health <= 0 {
+                //        commands.entity(other_entity).despawn(); // Despawn the Brick if health is 0 or less
+                //    }
+                //}
+
+                //play sound
+                // commands.spawn(AudioBundle {
+                //     source: collision_sound.clone(),
+                //     settings: PlaybackSettings::DESPAWN,
+                // });
+            }
+        }
     }
 }
