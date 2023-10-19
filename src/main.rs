@@ -80,6 +80,7 @@ fn setup(mut commands: Commands, assets_server: Res<AssetServer>) {
             ..default()
         },
         Paddle,
+        Collider { size: PADDLE_SIZE },
     ));
 
     //ball
